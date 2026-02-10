@@ -87,5 +87,20 @@ class HotelsInput(BaseModel):
 class HotelsInputSchema(BaseModel):
     """Wrapper schema required for LangChain tool invocation."""
     params: HotelsInput
-    
 
+
+# -------------------- API Request/Response Models --------------------
+
+class ChatRequest(BaseModel):
+    """Request model for chat message."""
+    message: str
+
+
+class ChatResponse(BaseModel):
+    """Response model for chat message."""
+    response: str
+
+
+class MessageHistoryResponse(BaseModel):
+    """Response model for message history."""
+    messages: list

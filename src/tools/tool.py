@@ -1,7 +1,7 @@
 from typing import Dict
 
 from langchain_core.tools import tool
-from serpapi import GoogleSearch 
+from serpapi import Client
 
 from src.core import settings
 from src.models import (
@@ -24,9 +24,10 @@ from src.models import (
     ),
 )
 def flights_finder(params: FlightsInput) -> Dict:
+    client = Client(api_key=settings["SERPAPI_API_KEY"])
+    
     search_params = {
         "engine": "google_flights",
-        "api_key": settings["SERPAPI_API_KEY"],
         "hl": "en",
         "gl": "in",
         "currency": "INR",
@@ -41,8 +42,8 @@ def flights_finder(params: FlightsInput) -> Dict:
         "stops": "1",
     }
 
-    search = GoogleSearch(search_params)
-    return search.get_dict()
+    results = client.search(search_params)
+    return results.as_dict()
 
 
 
@@ -58,9 +59,10 @@ def flights_finder(params: FlightsInput) -> Dict:
     ),
 )
 def hotels_finder(params: HotelsInput) -> Dict:
+    client = Client(api_key=settings["SERPAPI_API_KEY"])
+    
     search_params = {
         "engine": "google_hotels",
-        "api_key": settings["SERPAPI_API_KEY"],
         "hl": "en",
         "gl": "in",
         "currency": "INR",
@@ -74,6 +76,5 @@ def hotels_finder(params: HotelsInput) -> Dict:
         "hotel_class": params.hotel_class,
     }
 
-    search = GoogleSearch(search_params)
-    return search.get_dict()
-
+    results = client.search(search_params)
+    return results.as_dict()

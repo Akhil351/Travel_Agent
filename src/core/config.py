@@ -13,6 +13,7 @@ def get_settings():
         # 🔐 API Keys
         "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
         "SERPAPI_API_KEY": os.getenv("SERPAPI_API_KEY"),
+        "PINECONE_API_KEY": os.getenv("PINECONE_API_KEY"),
 
         # 🗄️ Database
         "DATABASE_URL": os.getenv("DATABASE_URL"),

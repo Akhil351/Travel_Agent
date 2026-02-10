@@ -71,6 +71,7 @@ def decide_next_node(state: AgentState) -> str:
 # ------------------------------------------------------------------
 
 def build_travel_agent():
+    """Build and compile the travel agent graph."""
     graph = StateGraph(AgentState)
 
     graph.add_node("call_llm", call_llm)
