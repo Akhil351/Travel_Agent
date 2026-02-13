@@ -1,6 +1,7 @@
 # 📁 services/travel_service.py
 # Service layer for managing messages
 
+import json
 from typing import List, Dict
 from sqlalchemy.orm import Session
 from langchain_core.messages import HumanMessage, AIMessage
@@ -152,7 +153,11 @@ def process_chat_message(session: Session, user_message: str) -> Dict[str, str]:
     # Step 4: Save messages
     save_messages(session, user_message, ai_response)
     
-    # Step 5: Return response
-    return {
-        "response": ai_response
-    }
+    # Step 5: Try to parse response as JSON
+    try:
+        # Attempt to parse as JSON
+        response_data = json.loads(ai_response)
+        return {"response": response_data}
+    except (json.JSONDecodeError, TypeError):
+        # If not JSON, return as plain text
+        return {"response": ai_response}
