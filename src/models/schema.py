@@ -98,7 +98,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Response model for chat message."""
-    response: str
+    response: str | dict
 
 
 class MessageHistoryResponse(BaseModel):
