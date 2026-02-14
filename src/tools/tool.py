@@ -40,7 +40,6 @@ def flights_finder(params: FlightsInput) -> List[Dict]:
         "children": params.children,
         "infants_in_seat": params.infants_in_seat,
         "infants_on_lap": params.infants_on_lap,
-        "stops": "1",
     }
 
     results = client.search(search_params)

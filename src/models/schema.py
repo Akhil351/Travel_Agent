@@ -1,4 +1,6 @@
 from pydantic import BaseModel, Field
+from typing import Optional
+from uuid import UUID
 
 
 # -------------------- Flights Models --------------------
@@ -94,11 +96,19 @@ class HotelsInputSchema(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chat message."""
     message: str
+    session_id: Optional[UUID] = Field(
+        None,
+        description="Session ID for conversation. If not provided, a new session will be created."
+    )
 
 
 class ChatResponse(BaseModel):
     """Response model for chat message."""
     response: str | dict
+    session_id: UUID = Field(
+        ...,
+        description="Session ID for this conversation"
+    )
 
 
 class MessageHistoryResponse(BaseModel):

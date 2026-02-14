@@ -7,7 +7,7 @@ from typing import Dict, List
 def parse_flight_response(raw_response: Dict) -> List[Dict]:
     """
     Parse raw SerpAPI flight response and extract essential fields.
-    Returns only top 5 best flights.
+    Returns only top 5 flights from best_flights or other_flights.
     
     Args:
         raw_response: Raw response from SerpAPI flights search
@@ -17,11 +17,14 @@ def parse_flight_response(raw_response: Dict) -> List[Dict]:
     """
     flights = []
     
-    # Get only best_flights (top recommendations)
-    best_flights = raw_response.get("best_flights", [])
+    # Try best_flights first, fallback to other_flights if empty
+    flight_options = raw_response.get("best_flights", [])
+    
+    if not flight_options:
+        flight_options = raw_response.get("other_flights", [])
     
     # Limit to top 5
-    top_flights = best_flights[:5]
+    top_flights = flight_options[:5]
     
     for flight_option in top_flights:
         # Get flight legs

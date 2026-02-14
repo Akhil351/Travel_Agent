@@ -1,20 +1,23 @@
 # 📁 services/travel_service.py
-# Service layer for managing messages
+# Service layer for managing messages and conversation summaries
 
 import json
-from typing import List, Dict
+import uuid
+from typing import List, Dict, Tuple, Optional
+from uuid import UUID
 from sqlalchemy.orm import Session
 from langchain_core.messages import HumanMessage, AIMessage
 
-from src.models.psql import Message
+from src.models.psql import Message, ConversationSummary
 from src.agents import build_travel_agent
+from src.agents.summarize_agent import update_summary
+from src.core import settings
 
 
 # ------------------------------------------------------------------
 # 🚀 Lazy Agent Initialization
 # ------------------------------------------------------------------
 
-# Agent will be compiled on first use (lazy loading)
 _TRAVEL_AGENT = None
 
 
@@ -27,10 +30,88 @@ def get_travel_agent():
 
 
 # ------------------------------------------------------------------
+# 📝 Conversation Summary Management
+# ------------------------------------------------------------------
+
+def get_or_create_summary(session: Session, session_id: UUID) -> ConversationSummary:
+    """
+    Get existing conversation summary or create new one.
+    
+    Args:
+        session: Database session
+        session_id: UUID of the conversation session
+        
+    Returns:
+        ConversationSummary object
+    """
+    summary = session.query(ConversationSummary).filter(
+        ConversationSummary.session_id == session_id
+    ).first()
+    
+    if not summary:
+        summary = ConversationSummary(
+            session_id=session_id,
+            summary=""
+        )
+        session.add(summary)
+        session.commit()
+        session.refresh(summary)
+    
+    return summary
+
+
+def update_conversation_summary(
+    session: Session, 
+    summary_record: ConversationSummary
+) -> None:
+    """
+    Update conversation summary with unsummarized messages.
+    
+    Args:
+        session: Database session
+        summary_record: ConversationSummary to update
+    """
+    # Get all unsummarized messages for this conversation
+    unsummarized_messages = session.query(Message).filter(
+        Message.conversation_summary_id == summary_record.id,
+        Message.is_summarized == False
+    ).order_by(Message.created_at.asc()).all()
+    
+    if not unsummarized_messages:
+        return
+    
+    # Convert to dict format for summarize agent
+    messages_dict = [
+        {"role": msg.role, "content": msg.content}
+        for msg in unsummarized_messages
+    ]
+    
+    # Update summary using summarize agent
+    new_summary = update_summary(
+        current_summary=summary_record.summary,
+        new_messages=messages_dict
+    )
+    
+    # Update summary in database
+    summary_record.summary = new_summary
+    
+    # Mark all those messages as summarized
+    for msg in unsummarized_messages:
+        msg.is_summarized = True
+    
+    session.commit()
+
+
+# ------------------------------------------------------------------
 # 💬 Message Management
 # ------------------------------------------------------------------
 
-def save_messages(session: Session, user_message: str, ai_message: str) -> None:
+def save_messages(
+    session: Session, 
+    user_message: str, 
+    ai_message: str,
+    conversation_summary_id: int
+) -> None:
     """
     Save both user and AI messages to the database.
     
@@ -38,17 +119,20 @@ def save_messages(session: Session, user_message: str, ai_message: str) -> None:
         session: Database session
         user_message: User's message content
         ai_message: AI's response content
+        conversation_summary_id: ID of the conversation summary
     """
-    # Create user message
     user_msg = Message(
         role="user",
-        content=user_message
+        content=user_message,
+        conversation_summary_id=conversation_summary_id,
+        is_summarized=False
     )
     
-    # Create AI message
     ai_msg = Message(
         role="ai",
-        content=ai_message
+        content=ai_message,
+        conversation_summary_id=conversation_summary_id,
+        is_summarized=False
     )
     
     session.add(user_msg)
@@ -56,17 +140,24 @@ def save_messages(session: Session, user_message: str, ai_message: str) -> None:
     session.commit()
 
 
-def get_all_messages(session: Session) -> List[Dict[str, str]]:
+def get_unsummarized_messages(
+    session: Session, 
+    conversation_summary_id: int
+) -> List[Dict[str, str]]:
     """
-    Get all messages from the database.
+    Get all unsummarized messages for a conversation.
     
     Args:
         session: Database session
+        conversation_summary_id: ID of the conversation summary
         
     Returns:
         List of message dictionaries with 'role' and 'content'
     """
-    messages = session.query(Message).order_by(Message.created_at.asc()).all()
+    messages = session.query(Message).filter(
+        Message.conversation_summary_id == conversation_summary_id,
+        Message.is_summarized == False
+    ).order_by(Message.created_at.asc()).all()
     
     return [
         {"role": msg.role, "content": msg.content}
@@ -74,40 +165,89 @@ def get_all_messages(session: Session) -> List[Dict[str, str]]:
     ]
 
 
+def count_unsummarized_messages(
+    session: Session, 
+    conversation_summary_id: int
+) -> int:
+    """
+    Count unsummarized messages for a conversation.
+    
+    Args:
+        session: Database session
+        conversation_summary_id: ID of the conversation summary
+        
+    Returns:
+        Count of unsummarized messages
+    """
+    return session.query(Message).filter(
+        Message.conversation_summary_id == conversation_summary_id,
+        Message.is_summarized == False
+    ).count()
+
+
+def get_all_messages(session: Session, conversation_summary_id: int) -> List[Dict[str, str]]:
+    """
+    Get all messages for a conversation.
+    
+    Args:
+        session: Database session
+        conversation_summary_id: ID of the conversation summary
+        
+    Returns:
+        List of message dictionaries with 'role' and 'content'
+    """
+    messages = session.query(Message).filter(
+        Message.conversation_summary_id == conversation_summary_id
+    ).order_by(Message.created_at.asc()).all()
+    
+    return [
+        {"role": msg.role, "content": msg.content}
+        for msg in messages
+    ]
 
 
 # ------------------------------------------------------------------
 # 🤖 Agent Runner
 # ------------------------------------------------------------------
 
-def run_travel_agent(user_message: str, previous_messages: List = None) -> str:
+def run_travel_agent(
+    user_message: str, 
+    conversation_summary: str = "",
+    unsummarized_messages: List[Dict[str, str]] = None
+) -> str:
     """
-    Run the travel agent with optional conversation history.
+    Run the travel agent with summary and recent messages.
     
     Args:
         user_message: Current user message
-        previous_messages: Optional list of previous LangChain message objects
+        conversation_summary: Compressed summary of old messages
+        unsummarized_messages: Recent unsummarized messages
         
     Returns:
         AI response as string
     """
-    # Build initial messages
+    # Build messages list
     messages = []
     
-    # Add previous conversation history if exists
-    if previous_messages:
-        messages.extend(previous_messages)
+    # Add unsummarized messages (recent context)
+    if unsummarized_messages:
+        for msg in unsummarized_messages:
+            if msg["role"] == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "ai":
+                messages.append(AIMessage(content=msg["content"]))
     
     # Add current user message
     messages.append(HumanMessage(content=user_message))
     
-    # Initialize agent state
-    initial_state = {"messages": messages}
+    # Initialize agent state with summary and messages
+    initial_state = {
+        "conversation_summary": conversation_summary,
+        "messages": messages
+    }
     
-    # Get or create agent (lazy initialization)
+    # Get agent and invoke
     agent = get_travel_agent()
-    
-    # Invoke the agent
     result = agent.invoke(initial_state)
     
     # Extract final AI response
@@ -120,44 +260,53 @@ def run_travel_agent(user_message: str, previous_messages: List = None) -> str:
 # 🚀 Main Workflow
 # ------------------------------------------------------------------
 
-def process_chat_message(session: Session, user_message: str) -> Dict[str, str]:
+def process_chat_message(
+    session: Session, 
+    user_message: str,
+    session_id: Optional[UUID] = None
+) -> Tuple[Dict[str, str], UUID]:
     """
-    Main workflow for processing a chat message.
+    Main workflow for processing a chat message with summarization.
     
     Args:
         session: Database session
         user_message: User's message
+        session_id: Optional session ID (creates new if not provided)
         
     Returns:
-        Dictionary with 'response'
+        Tuple of (response dict, session_id)
     """
     
-    # Step 1: Get all previous messages from database
-    previous_messages_dict = get_all_messages(session)
+    # Step 1: Create new session if not provided
+    if session_id is None:
+        session_id = uuid.uuid4()
     
-    # Step 2: Convert to LangChain message objects
-    previous_messages = []
-    if previous_messages_dict:
-        for msg in previous_messages_dict:
-            if msg["role"] == "user":
-                previous_messages.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "ai":
-                previous_messages.append(AIMessage(content=msg["content"]))
+    # Step 2: Get or create conversation summary
+    summary_record = get_or_create_summary(session, session_id)
     
-    # Step 3: Run agent with previous messages
+    # Step 3: Get unsummarized messages (recent context)
+    unsummarized_messages = get_unsummarized_messages(session, summary_record.id)
+    
+    # Step 4: Run agent with summary + unsummarized messages + new message
     ai_response = run_travel_agent(
         user_message=user_message,
-        previous_messages=previous_messages if previous_messages else None
+        conversation_summary=summary_record.summary,
+        unsummarized_messages=unsummarized_messages
     )
     
-    # Step 4: Save messages
-    save_messages(session, user_message, ai_response)
+    # Step 5: Save new messages
+    save_messages(session, user_message, ai_response, summary_record.id)
     
-    # Step 5: Try to parse response as JSON
+    # Step 6: Check if we should update summary
+    threshold = settings["SUMMARY_UPDATE_THRESHOLD"]
+    unsummarized_count = count_unsummarized_messages(session, summary_record.id)
+    
+    if unsummarized_count >= threshold:
+        update_conversation_summary(session, summary_record)
+    
+    # Step 7: Parse and return response
     try:
-        # Attempt to parse as JSON
         response_data = json.loads(ai_response)
-        return {"response": response_data}
+        return {"response": response_data}, session_id
     except (json.JSONDecodeError, TypeError):
-        # If not JSON, return as plain text
-        return {"response": ai_response}
+        return {"response": ai_response}, session_id

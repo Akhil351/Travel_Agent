@@ -34,6 +34,9 @@ def get_settings():
             "APP_DESCRIPTION",
             "AI-powered Travel Agent for flights and hotels",
         ),
+        
+        # 🤖 Agent Configuration
+        "SUMMARY_UPDATE_THRESHOLD": int(os.getenv("SUMMARY_UPDATE_THRESHOLD", 20)),
     }
 
 # Load settings once
